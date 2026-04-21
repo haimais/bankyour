@@ -889,26 +889,28 @@ function mergeBanksWithProducts(
 
 function inferFallbackCategoryFromQuery(query: string): ProductCategory | null {
   const normalized = normalizeSearch(query);
-  if (!normalized) {
+  const raw = query.toLowerCase().trim();
+  const signal = `${raw} ${normalized}`.trim();
+  if (!signal) {
     return null;
   }
 
-  if (/(ипотек|mortgage|home\s*loan|housing)/i.test(normalized)) {
+  if (/(ипотек|ipotek|mortgage|home\s*loan|housing)/i.test(signal)) {
     return "mortgages";
   }
-  if (/(кредит|loan|заем|consumer)/i.test(normalized)) {
+  if (/(кредит|kredit|loan|заем|zaem|consumer)/i.test(signal)) {
     return "consumer_loans";
   }
-  if (/(вклад|депозит|deposit|saving|сбереж)/i.test(normalized)) {
+  if (/(вклад|vklad|депозит|deposit|saving|сбереж|sberezh)/i.test(signal)) {
     return "deposits";
   }
-  if (/(карт|card|debit|credit)/i.test(normalized)) {
+  if (/(карт|karta|card|debit|credit)/i.test(signal)) {
     return "debit_cards";
   }
-  if (/(бизнес|business|rko|acquiring|merchant)/i.test(normalized)) {
+  if (/(бизнес|biznes|business|rko|acquiring|merchant)/i.test(signal)) {
     return "business_services";
   }
-  if (/(документ|document|paperwork|compliance)/i.test(normalized)) {
+  if (/(документ|dokument|document|paperwork|compliance)/i.test(signal)) {
     return "document_assistance";
   }
 
