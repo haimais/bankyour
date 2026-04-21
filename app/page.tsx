@@ -97,7 +97,7 @@ export default function HomePage() {
     void load();
     const timer = window.setInterval(() => {
       void load();
-    }, 60_000);
+    }, 180_000);
 
     return () => {
       cancelled = true;

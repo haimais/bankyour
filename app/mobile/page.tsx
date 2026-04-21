@@ -7,7 +7,7 @@ import { RetryButton } from "@/components/common/RetryButton";
 import { useLocale } from "@/context/LocaleContext";
 import { MobileExpoLinkResponse } from "@/lib/types";
 
-const REFRESH_MS = 30_000;
+const REFRESH_MS = 120_000;
 
 const COPY = {
   ru: {
@@ -28,7 +28,7 @@ const COPY = {
     installHint: "Если Expo Go не установлен, установите его из App Store.",
     lastSuccessful: "Последний успешный запуск",
     retryAttempt: "Попытка",
-    statusHelp: "Статус ссылки обновляется автоматически каждые 30 секунд."
+    statusHelp: "Статус ссылки обновляется автоматически каждые 2 минуты."
   },
   en: {
     title: "iPhone App (Expo Go)",
@@ -48,7 +48,7 @@ const COPY = {
     installHint: "If Expo Go is missing, install it from the App Store.",
     lastSuccessful: "Last successful launch",
     retryAttempt: "Attempt",
-    statusHelp: "The link status is auto-refreshed every 30 seconds."
+    statusHelp: "The link status is auto-refreshed every 2 minutes."
   }
 } as const;
 

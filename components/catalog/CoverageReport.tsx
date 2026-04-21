@@ -8,7 +8,7 @@ import { useLocale } from "@/context/LocaleContext";
 import { getCategoryLabel, getCountryLabel } from "@/data/i18n";
 import { CoverageReportResponse, CountryCoverageReport, ProductCategory } from "@/lib/types";
 
-const REFRESH_MS = 60_000;
+const REFRESH_MS = 180_000;
 
 const LABELS: Record<string, Record<string, string>> = {
   title: {

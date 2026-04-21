@@ -12,7 +12,7 @@ import { COUNTRY_LABELS, UI_TEXT } from "@/data/i18n";
 import { getValidExternalUrl } from "@/lib/utils/externalUrl";
 import { NewsItem, PulseDetailResponse } from "@/lib/types";
 
-const REFRESH_INTERVAL_MS = 30_000;
+const REFRESH_INTERVAL_MS = 120_000;
 
 interface NewsApiResponse {
   items: NewsItem[];
