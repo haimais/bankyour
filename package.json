@@ -1,0 +1,44 @@
+{
+  "name": "bank-your",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test:e2e": "playwright test",
+    "db:init": "tsx scripts/init-db.ts",
+    "worker": "tsx scripts/ingestion-worker.ts",
+    "mobile:install": "npm --prefix mobile install",
+    "mobile:typecheck": "npm --prefix mobile run typecheck",
+    "mobile:start": "npm --prefix mobile run start",
+    "mobile:expo-go": "npm --prefix mobile run start:tunnel",
+    "mobile:expo-go:local": "EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:3000 npm --prefix mobile run start:tunnel",
+    "mobile:expo-go:publish": "tsx scripts/publish-expo-link.ts",
+    "mobile:ios": "npm --prefix mobile run ios"
+  },
+  "dependencies": {
+    "framer-motion": "^11.11.17",
+    "ioredis": "^5.9.3",
+    "lucide-react": "^0.469.0",
+    "next": "^14.2.0",
+    "pg": "^8.18.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.16.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.2"
+  }
+}

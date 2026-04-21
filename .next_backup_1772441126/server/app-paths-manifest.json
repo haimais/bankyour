@@ -1,0 +1,12 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/services/page": "app/services/page.js",
+  "/api/catalog/route": "app/api/catalog/route.js",
+  "/api/mobile/expo-link/route": "app/api/mobile/expo-link/route.js",
+  "/api/pulse/route": "app/api/pulse/route.js",
+  "/news/page": "app/news/page.js",
+  "/page": "app/page.js",
+  "/business/page": "app/business/page.js",
+  "/calculators/[type]/page": "app/calculators/[type]/page.js",
+  "/api/admin/refresh/route": "app/api/admin/refresh/route.js"
+}
