@@ -824,6 +824,69 @@ function buildFallbackBanksFromProducts(country: Country, products: ProductItem[
   });
 }
 
+function buildProductDedupeKey(item: ProductItem): string {
+  return [
+    item.canonicalBankId ?? item.bankId,
+    item.category,
+    normalizeSearch(item.name),
+    normalizeSearch(item.rate ?? ""),
+    normalizeSearch(item.term ?? ""),
+    normalizeSearch(item.minAmount ?? ""),
+    normalizeSearch(item.annualFee ?? "")
+  ].join("|");
+}
+
+function mergeSnapshotWithFallbackProducts(
+  snapshotProducts: ProductItem[],
+  fallbackProducts: ProductItem[]
+): ProductItem[] {
+  const merged = new Map<string, ProductItem>();
+  snapshotProducts.forEach((item) => {
+    merged.set(buildProductDedupeKey(item), item);
+  });
+  fallbackProducts.forEach((item) => {
+    const key = buildProductDedupeKey(item);
+    if (!merged.has(key)) {
+      merged.set(key, item);
+    }
+  });
+  return Array.from(merged.values());
+}
+
+function mergeBanksWithProducts(
+  snapshotBanks: BankRegistryItem[],
+  fallbackBanks: BankRegistryItem[],
+  products: ProductItem[]
+): BankRegistryItem[] {
+  const byBank = new Map<string, BankRegistryItem>();
+  snapshotBanks.forEach((bank) => {
+    byBank.set(bank.id, bank);
+  });
+  fallbackBanks.forEach((bank) => {
+    if (!byBank.has(bank.id)) {
+      byBank.set(bank.id, bank);
+    }
+  });
+
+  const productsByBank = new Map<string, number>();
+  products.forEach((item) => {
+    const bankId = item.canonicalBankId ?? item.bankId;
+    productsByBank.set(bankId, (productsByBank.get(bankId) ?? 0) + 1);
+  });
+
+  return Array.from(byBank.values()).map((bank) => {
+    const productsCount = productsByBank.get(bank.id) ?? bank.productsCount ?? 0;
+    const coverageStatus: BankCoverageStatus =
+      productsCount > 3 ? "full" : productsCount > 0 ? "partial" : bank.coverageStatus ?? "registry_only";
+    return {
+      ...bank,
+      productsCount,
+      coverageStatus,
+      lastProductSeenAt: productsCount > 0 ? bank.lastProductSeenAt ?? nowIso() : bank.lastProductSeenAt
+    };
+  });
+}
+
 function inferFallbackCategoryFromQuery(query: string): ProductCategory | null {
   const normalized = normalizeSearch(query);
   if (!normalized) {
@@ -854,7 +917,12 @@ function inferFallbackCategoryFromQuery(query: string): ProductCategory | null {
 
 function getEffectiveSnapshotData(country: Country) {
   const snapshot = state.byCountry[country];
-  if (snapshot.products.length > 0) {
+  const fallbackProducts = buildStaticFallbackProducts(country);
+  const shouldMergeFallback =
+    fallbackProducts.length > 0 &&
+    (snapshot.products.length === 0 || snapshot.products.length < fallbackProducts.length);
+
+  if (!shouldMergeFallback) {
     return {
       snapshot,
       products: snapshot.products,
@@ -863,14 +931,17 @@ function getEffectiveSnapshotData(country: Country) {
     };
   }
 
-  const fallbackProducts = buildStaticFallbackProducts(country);
-  const fallbackBanks =
-    fallbackProducts.length > 0 ? buildFallbackBanksFromProducts(country, fallbackProducts) : snapshot.banks;
+  const mergedProducts =
+    snapshot.products.length === 0
+      ? fallbackProducts
+      : mergeSnapshotWithFallbackProducts(snapshot.products, fallbackProducts);
+  const fallbackBanks = buildFallbackBanksFromProducts(country, fallbackProducts);
+  const mergedBanks = mergeBanksWithProducts(snapshot.banks, fallbackBanks, mergedProducts);
 
   return {
     snapshot,
-    products: fallbackProducts,
-    banks: fallbackBanks,
+    products: mergedProducts,
+    banks: mergedBanks,
     usingStaticFallback: true
   };
 }
