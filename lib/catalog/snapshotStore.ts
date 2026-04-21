@@ -1,5 +1,6 @@
 import { BANKS_BY_COUNTRY, getProxyLogoUrl } from "@/data/banks";
 import { COUNTRY_OPTIONS } from "@/data/countries";
+import { OFFERS_BY_COUNTRY } from "@/data/offers";
 import { deriveProductIntent, deriveRuleTags, getProductAiSummary } from "@/lib/ai/productSummary";
 import {
   getLastSuccessfulCycleFromDb,
@@ -709,6 +710,171 @@ function normalizeProducts(
   return deduplicated.filter((item) => shouldKeepNormalizedProduct(item));
 }
 
+function toProviderId(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^0-9a-zа-яё]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildStaticFallbackProducts(country: Country): ProductItem[] {
+  const offersByService = OFFERS_BY_COUNTRY[country];
+  if (!offersByService) {
+    return [];
+  }
+
+  const fetchedAt = nowIso();
+  const allOffers: Offer[] = [
+    ...offersByService.cards,
+    ...offersByService.loans,
+    ...offersByService.deposits,
+    ...offersByService.business,
+    ...offersByService.documents
+  ];
+
+  const products = allOffers.map((offer, index) => {
+    const category = mapLegacyToProductCategory(
+      offer.serviceType,
+      offer.name,
+      offer.sourceUrl ?? offer.url,
+      offer.description,
+      offer.params
+    );
+    const bankId = toProviderId(offer.providerName) || `${country}-fallback-${index + 1}`;
+    const hasNumericSignal =
+      hasNumericFinancialValue(parsePrimaryParam(offer, ["rate", "yield", "ставка", "доход"])) ||
+      hasNumericFinancialValue(parsePrimaryParam(offer, ["term", "срок", "horizon"])) ||
+      hasNumericFinancialValue(parsePrimaryParam(offer, ["minimum amount", "min amount", "миним"])) ||
+      hasNumericFinancialValue(parsePrimaryParam(offer, ["cashback", "кэшбэк"])) ||
+      hasNumericFinancialValue(parsePrimaryParam(offer, ["annual fee", "обслуживание", "service fee", "комиссия"]));
+
+    const product: ProductItem = {
+      id: `${country}-${offer.id}`,
+      bankId,
+      bankName: offer.providerName,
+      canonicalBankId: bankId,
+      canonicalBankName: offer.providerName,
+      bankLogoUrl: offer.providerLogoUrl || getProxyLogoUrl(offer.url),
+      category,
+      name: offer.name,
+      description: offer.description,
+      url: offer.url,
+      source: "registry_fallback",
+      params: offer.params,
+      cashback: parsePrimaryParam(offer, ["cashback", "кэшбэк"]),
+      annualFee: parsePrimaryParam(offer, ["annual fee", "обслуживание", "service fee", "комиссия"]),
+      currencyOptions: parseCurrencyOptions(offer),
+      rate: parsePrimaryParam(offer, ["rate", "yield", "ставка", "доход", "expected yield"]),
+      term: parsePrimaryParam(offer, ["term", "срок", "horizon", "timeline"]),
+      minAmount: parsePrimaryParam(offer, ["minimum amount", "min amount", "миним"]),
+      maxAmount: parseMaxAmount(offer),
+      capitalization: inferCapitalization(offer),
+      rateType: inferRateType(offer),
+      repaymentType: inferRepaymentType(offer),
+      sourceUrl: offer.sourceUrl ?? offer.url,
+      sourceFetchedAt: fetchedAt,
+      sourceChain: ["registry_fallback", "static_catalog_fallback"],
+      qualityFlags: ["static_fallback"],
+      qualityScore: hasNumericSignal ? 72 : 55,
+      completeness: hasNumericSignal ? "partial" : "pending",
+      extractedAt: fetchedAt,
+      verifiedAt: undefined,
+      updatedAt: fetchedAt
+    };
+
+    return {
+      ...product,
+      category: mapCategory(product),
+      depositType: detectDepositType(product),
+      hasRealRate: hasNumericFinancialValue(product.rate),
+      hasRealTerm: hasNumericFinancialValue(product.term)
+    } as ProductItem;
+  });
+
+  return products.filter((item) => shouldKeepNormalizedProduct(item));
+}
+
+function buildFallbackBanksFromProducts(country: Country, products: ProductItem[]): BankRegistryItem[] {
+  const byBank = new Map<string, ProductItem[]>();
+  products.forEach((product) => {
+    const bankId = product.canonicalBankId ?? product.bankId;
+    const current = byBank.get(bankId) ?? [];
+    current.push(product);
+    byBank.set(bankId, current);
+  });
+
+  return Array.from(byBank.entries()).map(([id, items]) => {
+    const website = items[0]?.sourceUrl ?? items[0]?.url ?? "https://bank.example";
+    const count = items.length;
+    const coverageStatus: BankCoverageStatus = count > 3 ? "full" : "partial";
+    return {
+      id,
+      country,
+      name: items[0]?.canonicalBankName ?? items[0]?.bankName ?? "Fallback bank",
+      website,
+      logoUrl: items[0]?.bankLogoUrl ?? getProxyLogoUrl(website),
+      coverageStatus,
+      productsCount: count,
+      source: "bank_site",
+      registryStatus: "active",
+      lastProductSeenAt: nowIso(),
+      regulatorSource: "static_fallback"
+    };
+  });
+}
+
+function inferFallbackCategoryFromQuery(query: string): ProductCategory | null {
+  const normalized = normalizeSearch(query);
+  if (!normalized) {
+    return null;
+  }
+
+  if (/(ипотек|mortgage|home\s*loan|housing)/i.test(normalized)) {
+    return "mortgages";
+  }
+  if (/(кредит|loan|заем|consumer)/i.test(normalized)) {
+    return "consumer_loans";
+  }
+  if (/(вклад|депозит|deposit|saving|сбереж)/i.test(normalized)) {
+    return "deposits";
+  }
+  if (/(карт|card|debit|credit)/i.test(normalized)) {
+    return "debit_cards";
+  }
+  if (/(бизнес|business|rko|acquiring|merchant)/i.test(normalized)) {
+    return "business_services";
+  }
+  if (/(документ|document|paperwork|compliance)/i.test(normalized)) {
+    return "document_assistance";
+  }
+
+  return null;
+}
+
+function getEffectiveSnapshotData(country: Country) {
+  const snapshot = state.byCountry[country];
+  if (snapshot.products.length > 0) {
+    return {
+      snapshot,
+      products: snapshot.products,
+      banks: snapshot.banks,
+      usingStaticFallback: false
+    };
+  }
+
+  const fallbackProducts = buildStaticFallbackProducts(country);
+  const fallbackBanks =
+    fallbackProducts.length > 0 ? buildFallbackBanksFromProducts(country, fallbackProducts) : snapshot.banks;
+
+  return {
+    snapshot,
+    products: fallbackProducts,
+    banks: fallbackBanks,
+    usingStaticFallback: true
+  };
+}
+
 async function buildBankRegistry(country: Country, products: ProductItem[]): Promise<BankRegistryItem[]> {
   const byBank = new Map<string, number>();
   for (const item of products) {
@@ -791,11 +957,11 @@ export async function getCatalogBankGroups(input: {
   pageSize?: number;
 }) {
   await ensureSnapshotFresh();
-  const snapshot = state.byCountry[input.country];
+  const { snapshot, products: baseProducts, banks } = getEffectiveSnapshotData(input.country);
   const page = Math.max(1, input.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, input.pageSize ?? 20));
 
-  let products = snapshot.products;
+  let products = baseProducts;
   if (input.category) {
     products = products.filter((product) => product.category === input.category);
   }
@@ -827,7 +993,7 @@ export async function getCatalogBankGroups(input: {
     byBank.set(bankKey, current);
   });
 
-  const allGroups: BankGroupItem[] = snapshot.banks.map((bank) => {
+  const allGroups: BankGroupItem[] = banks.map((bank) => {
     const productList = byBank.get(bank.id) ?? [];
     return {
       bankId: bank.id,
@@ -873,11 +1039,11 @@ export async function getCatalogBankProducts(input: {
   pageSize?: number;
 }) {
   await ensureSnapshotFresh();
-  const snapshot = state.byCountry[input.country];
+  const { snapshot, products: baseProducts } = getEffectiveSnapshotData(input.country);
   const page = Math.max(1, input.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, input.pageSize ?? 20));
 
-  let products = snapshot.products.filter(
+  let products = baseProducts.filter(
     (product) => (product.canonicalBankId ?? product.bankId) === input.bankId
   );
   if (input.category) {
@@ -1285,11 +1451,13 @@ export async function getCatalogResponse(input: {
   pageSize?: number;
 }): Promise<CatalogResponse> {
   await ensureSnapshotFresh();
-  const snapshot = state.byCountry[input.country];
+  const { snapshot, products: snapshotProducts, banks, usingStaticFallback } = getEffectiveSnapshotData(
+    input.country
+  );
   const page = Math.max(1, input.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, input.pageSize ?? 20));
 
-  let products = snapshot.products;
+  let products = snapshotProducts;
 
   if (input.category) {
     products = products.filter((product) => product.category === input.category);
@@ -1309,6 +1477,21 @@ export async function getCatalogResponse(input: {
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.product);
+
+    if (products.length === 0 && usingStaticFallback) {
+      const inferredCategory = inferFallbackCategoryFromQuery(input.q);
+      if (inferredCategory) {
+        products = snapshotProducts.filter((product) => {
+          if (inferredCategory === "consumer_loans") {
+            return product.category === "consumer_loans" || product.category === "mortgages";
+          }
+          if (inferredCategory === "debit_cards") {
+            return product.category === "debit_cards" || product.category === "credit_cards";
+          }
+          return product.category === inferredCategory;
+        });
+      }
+    }
   }
 
   if (input.bank) {
@@ -1372,7 +1555,7 @@ export async function getCatalogResponse(input: {
 
   if (input.bankStatus) {
     const bankStatusById = new Map(
-      snapshot.banks.map((bank) => [bank.id, bank.registryStatus ?? "unknown"] as const)
+      banks.map((bank) => [bank.id, bank.registryStatus ?? "unknown"] as const)
     );
     products = products.filter(
       (product) => bankStatusById.get(product.canonicalBankId ?? product.bankId) === input.bankStatus
@@ -1476,7 +1659,7 @@ export async function getCatalogResponse(input: {
       const intent = cachedAi?.intent ?? deriveProductIntent(item);
       const featureTags = cachedAi?.tags ?? (ai.tags.length > 0 ? ai.tags : deriveRuleTags(item));
       const bankStatus =
-        snapshot.banks.find((bank) => bank.id === (item.canonicalBankId ?? item.bankId))?.registryStatus ??
+        banks.find((bank) => bank.id === (item.canonicalBankId ?? item.bankId))?.registryStatus ??
         "unknown";
       return {
         ...item,
@@ -1499,12 +1682,12 @@ export async function getCatalogResponse(input: {
     fallback: products.filter((item) => item.source === "registry_fallback").length
   };
   const coverage = {
-    full: snapshot.banks.filter((bank) => bank.coverageStatus === "full").length,
-    partial: snapshot.banks.filter((bank) => bank.coverageStatus === "partial").length,
-    registryOnly: snapshot.banks.filter((bank) => bank.coverageStatus === "registry_only").length
+    full: banks.filter((bank) => bank.coverageStatus === "full").length,
+    partial: banks.filter((bank) => bank.coverageStatus === "partial").length,
+    registryOnly: banks.filter((bank) => bank.coverageStatus === "registry_only").length
   };
-  const banksTotal = snapshot.banks.length;
-  const banksCovered = snapshot.banks.filter((bank) => bank.coverageStatus !== "registry_only").length;
+  const banksTotal = banks.length;
+  const banksCovered = banks.filter((bank) => bank.coverageStatus !== "registry_only").length;
   const qualityFlagged = products.filter((item) => (item.qualityFlags ?? []).length > 0).length;
   const withAiSummary = enrichedPaginated.filter((item) => Boolean(item.aiSummary?.trim())).length;
   const matchedByName = input.q
@@ -1551,11 +1734,11 @@ export async function getCatalogResponse(input: {
 
 export async function getServicesResponse(
   country: Country,
-  _locale: Locale
+  locale: Locale
 ): Promise<ServicesApiResponse> {
-  void _locale;
+  void locale;
   await ensureSnapshotFresh();
-  const snapshot = state.byCountry[country];
+  const { snapshot, products, banks } = getEffectiveSnapshotData(country);
   const offersByService: CountryOffers = {
     cards: [],
     loans: [],
@@ -1564,7 +1747,7 @@ export async function getServicesResponse(
     documents: []
   };
 
-  snapshot.products.forEach((product) => {
+  products.forEach((product) => {
     const serviceType = categoryToServiceType(product.category);
     offersByService[serviceType].push(mapProductToOffer(product));
   });
@@ -1580,7 +1763,7 @@ export async function getServicesResponse(
   });
 
   const providerServices = new Map<string, Set<ServiceType>>();
-  snapshot.products.forEach((product) => {
+  products.forEach((product) => {
     const bankId = product.canonicalBankId ?? product.bankId;
     const serviceType = categoryToServiceType(product.category);
     const current = providerServices.get(bankId) ?? new Set<ServiceType>();
@@ -1588,7 +1771,7 @@ export async function getServicesResponse(
     providerServices.set(bankId, current);
   });
 
-  const providers: ProviderCatalogItem[] = snapshot.banks
+  const providers: ProviderCatalogItem[] = banks
     .map((bank) => ({
       id: bank.id,
       name: bank.name,
