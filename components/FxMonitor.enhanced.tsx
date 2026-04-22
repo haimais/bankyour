@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { TrendingDown, TrendingUp } from "lucide-react";
 import { useCountry, useCountryMeta } from "@/context/CountryContext";
 import { useLocale } from "@/context/LocaleContext";
-import { UI_TEXT } from "@/data/i18n";
 import { CurrencyCode, FxResponse } from "@/lib/types";
 
 interface FxMonitorProps {
@@ -180,7 +179,6 @@ export function FxMonitor({ compact = false }: FxMonitorProps) {
 
     async function load() {
       try {
-        setRequestError(null);
         const response = await fetch(
           `/api/fx?country=${country}&window=${windowSize}&base=${baseCode}&quote=${quoteCode}`,
           { cache: "no-store" }
@@ -193,7 +191,7 @@ export function FxMonitor({ compact = false }: FxMonitorProps) {
         if (!cancelled) {
           setPayload(data);
         }
-      } catch (error) {
+      } catch {
         if (!cancelled) {
           // Error state intentionally not shown
         }

@@ -1,17 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { useLocale } from "@/context/LocaleContext";
 import { UI_TEXT, getCountryLabel } from "@/data/i18n";
 import { getCategoryTranslation } from "@/lib/i18n/serviceTranslations";
-import { ProviderCatalogItem, ServiceType, LanguageCode, ProductCategory } from "@/lib/types";
+import { ProductItem, ServiceType, LanguageCode, ProductCategory } from "@/lib/types";
 import { CatalogProductCard } from "./CatalogProductCard";
 
 interface CatalogExplorerClientProps {
   country: string;
   serviceType: ServiceType;
-  initialProviders: ProviderCatalogItem[];
+  initialProviders: ProductItem[];
 }
 
 export function CatalogExplorerClient({
@@ -27,17 +27,24 @@ export function CatalogExplorerClient({
   const [searchTerm, setSearchTerm] = useState("");
   const [providers, setProviders] = useState(initialProviders);
   const [loading, setLoading] = useState(false);
-  const [_error, setError] = useState<string | null>(null);
 
   // Group providers by category
   const groupedByCategory = useMemo(() => {
-    const groups: Record<ProductCategory, ProviderCatalogItem[]> = {} as any;
+    const groups: Record<ProductCategory, ProductItem[]> = {
+      debit_cards: [],
+      credit_cards: [],
+      consumer_loans: [],
+      mortgages: [],
+      deposits: [],
+      investments: [],
+      business_services: [],
+      document_assistance: []
+    };
 
     for (const provider of providers) {
-      if (!groups[provider.category]) {
-        groups[provider.category] = [];
+      if (groups[provider.category]) {
+        groups[provider.category].push(provider);
       }
-      groups[provider.category].push(provider);
     }
 
     return groups;
@@ -61,7 +68,6 @@ export function CatalogExplorerClient({
 
     async function load() {
       try {
-        setError(null);
         setLoading(true);
         const response = await fetch(
           `/api/catalog?country=${country}&service=${serviceType}`,
@@ -76,9 +82,9 @@ export function CatalogExplorerClient({
         if (!cancelled) {
           setProviders(data.items || initialProviders);
         }
-      } catch (err) {
+      } catch {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Error loading catalog");
+          // Error state intentionally not shown
         }
       } finally {
         if (!cancelled) {
@@ -115,14 +121,6 @@ export function CatalogExplorerClient({
           className="w-full rounded-lg border border-slate-200 px-4 py-2 placeholder-slate-500"
         />
       </div>
-
-      {/* Error */}
-      {_error && (
-        <div className="flex items-center gap-3 rounded-lg bg-red-50 p-4 text-red-700">
-          <AlertCircle size={20} />
-          <div>{_error}</div>
-        </div>
-      )}
 
       {/* Loading */}
       {loading && (
@@ -168,8 +166,7 @@ export function CatalogExplorerClient({
                       {items.map((provider) => (
                         <CatalogProductCard
                           key={provider.id}
-                          product={provider}
-                          locale={locale}
+                          item={provider}
                         />
                       ))}
                     </div>
