@@ -151,7 +151,7 @@ export function ChatBot() {
     void loadHealth();
     const timer = window.setInterval(() => {
       void loadHealth();
-    }, 120_000);
+    }, 30_000);
 
     return () => {
       cancelled = true;

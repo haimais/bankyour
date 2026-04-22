@@ -34,11 +34,6 @@ interface TranslatedArticlePayload extends CachedArticlePayload {
 }
 
 const ARTICLE_CACHE = new Map<string, CachedArticlePayload>();
-const ARTICLE_PIPELINE_VERSION = "news-pipeline-v2";
-const TRANSLATE_CHUNK_MAX_CHARS = 2_400;
-const TRANSLATE_MAX_CHUNKS = 60;
-const BOILERPLATE_LINE_RE =
-  /(подпис|subscribe|cookie|consent|advert|реклам|all rights reserved|читать также|related|recommended|share this|follow us|comments?)/i;
 
 const ARTICLE_AI_SUMMARY_CACHE = new Map<
   string,
@@ -51,326 +46,18 @@ const ARTICLE_AI_SUMMARY_CACHE = new Map<
   }
 >();
 
-function decodeHtmlEntities(value: string): string {
-  if (!value) {
-    return "";
-  }
-
-  const named: Record<string, string> = {
-    nbsp: " ",
-    amp: "&",
-    quot: '"',
-    apos: "'",
-    lt: "<",
-    gt: ">",
-    mdash: "-",
-    ndash: "-",
-    hellip: "...",
-    laquo: '"',
-    raquo: '"'
-  };
-
-  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity: string) => {
-    const lower = entity.toLowerCase();
-    if (lower in named) {
-      return named[lower];
-    }
-    if (lower.startsWith("#x")) {
-      const code = Number.parseInt(lower.slice(2), 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
-    }
-    if (lower.startsWith("#")) {
-      const code = Number.parseInt(lower.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
-    }
-    return match;
-  });
-}
-
 function stripHtml(html: string): string {
-  const cleaned = html
+  return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<[^>]+>/g, " ");
-
-  return decodeHtmlEntities(cleaned)
-    .replace(/\r/g, "\n")
-    .replace(/[ \t\f\v]+/g, " ")
-    .replace(/\s*\n\s*/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
     .trim();
-}
-
-function normalizeInlineWhitespace(value: string): string {
-  return value
-    .replace(/[ \t\r\n]+/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-function removeBoilerplateBlocks(html: string): string {
-  return html
-    .replace(/<(script|style|noscript|template|svg|iframe|form|button|input|select|textarea|canvas)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<(nav|header|footer|aside)[\s\S]*?<\/\1>/gi, " ")
-    .replace(
-      /<(div|section|ul|ol)[^>]*(?:id|class)=["'][^"']*(?:ad-|ads|advert|promo|banner|subscribe|newsletter|cookie|consent|share|social|related|recommend|comment|widget|sponsor|paywall|outbrain|taboola)[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
-      " "
-    );
-}
-
-function isLikelyNoiseBlock(text: string): boolean {
-  if (!text.trim()) {
-    return true;
-  }
-
-  if (BOILERPLATE_LINE_RE.test(text)) {
-    return true;
-  }
-
-  const lower = text.toLowerCase();
-  if (/^\d{1,2}:\d{2}\s*,?\s*\d{1,2}\s+[a-zа-яё]+\s+\d{4}/i.test(lower)) {
-    return true;
-  }
-
-  if (/(редактор|editor|updated|обновлено)/i.test(lower) && text.length < 120) {
-    return true;
-  }
-  if (/(^|\s)(erid:|соглашение:|advertisement)(\s|$)/i.test(lower)) {
-    return true;
-  }
-
-  const tokenCount = text.split(/\s+/).length;
-  const punctuationCount = (text.match(/[.!?]/g) ?? []).length;
-  if (punctuationCount === 0 && tokenCount >= 5 && tokenCount <= 28 && text.length < 190) {
-    return true;
-  }
-
-  return false;
-}
-
-function htmlToTextBlocks(html: string): string[] {
-  const normalized = removeBoilerplateBlocks(html)
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|h1|h2|h3|h4|h5|h6|li|blockquote|section|article|div)>/gi, "\n");
-
-  const paragraphMatches = normalized.match(/<(p|li|blockquote)[^>]*>[\s\S]*?<\/\1>/gi) ?? [];
-  const rawBlocks =
-    paragraphMatches.length > 0
-      ? paragraphMatches.map((block) => normalizeInlineWhitespace(stripHtml(block)))
-      : stripHtml(normalized)
-          .split(/\n+/)
-          .map((line) => normalizeInlineWhitespace(line));
-
-  const seen = new Set<string>();
-  const blocks: string[] = [];
-  for (const text of rawBlocks) {
-    if (text.length < 45) {
-      continue;
-    }
-    if (isLikelyNoiseBlock(text)) {
-      continue;
-    }
-    const key = text.toLowerCase().slice(0, 180);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    blocks.push(text);
-  }
-
-  return blocks;
-}
-
-function scoreTextBlocks(blocks: string[]): number {
-  const text = blocks.join(" ");
-  const sentenceCount = Math.max(1, splitSentences(text).length);
-  return text.length + blocks.length * 180 + sentenceCount * 40;
-}
-
-function pickBestCandidateText(html: string, trace: string[]): string {
-  const candidates: Array<{ source: string; html: string }> = [];
-  const articleMatches = Array.from(html.matchAll(/<article[\s\S]*?<\/article>/gi))
-    .map((match) => match[0])
-    .slice(0, 6);
-  articleMatches.forEach((value) => candidates.push({ source: "article", html: value }));
-
-  const mainMatches = Array.from(html.matchAll(/<main[\s\S]*?<\/main>/gi))
-    .map((match) => match[0])
-    .slice(0, 3);
-  mainMatches.forEach((value) => candidates.push({ source: "main", html: value }));
-
-  const semanticMatches = Array.from(
-    html.matchAll(
-      /<(section|div)[^>]*(?:id|class)=["'][^"']*(?:article|story|entry|content|post-body|article-body|news-body|article-content|story-body)[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi
-    )
-  )
-    .map((match) => match[0])
-    .slice(0, 12);
-  semanticMatches.forEach((value) => candidates.push({ source: "semantic", html: value }));
-
-  const bodyMatch = html.match(/<body[\s\S]*?<\/body>/i)?.[0];
-  if (bodyMatch) {
-    candidates.push({ source: "body", html: bodyMatch });
-  } else {
-    candidates.push({ source: "full_html", html });
-  }
-
-  let bestScore = 0;
-  let bestText = "";
-  let bestSource = "fallback";
-
-  for (const candidate of candidates) {
-    const blocks = htmlToTextBlocks(candidate.html);
-    if (blocks.length === 0) {
-      continue;
-    }
-
-    const score = scoreTextBlocks(blocks);
-    if (score > bestScore) {
-      bestScore = score;
-      bestText = blocks.join("\n\n");
-      bestSource = candidate.source;
-    }
-  }
-
-  if (bestText.trim()) {
-    trace.push(`content_source_${bestSource}`);
-    return bestText;
-  }
-
-  trace.push("content_source_fallback_strip");
-  return stripHtml(removeBoilerplateBlocks(bodyMatch ?? html));
-}
-
-function extractMetaContent(html: string, key: string): string | undefined {
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [
-    new RegExp(
-      `<meta[^>]+(?:property|name)=["']${escapedKey}["'][^>]*content=["']([^"']+)["'][^>]*>`,
-      "i"
-    ),
-    new RegExp(
-      `<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["']${escapedKey}["'][^>]*>`,
-      "i"
-    )
-  ];
-  for (const pattern of patterns) {
-    const match = html.match(pattern)?.[1];
-    if (match?.trim()) {
-      return normalizeInlineWhitespace(decodeHtmlEntities(match));
-    }
-  }
-  return undefined;
-}
-
-function absolutizeUrl(sourceUrl: string, maybeRelative?: string): string | undefined {
-  if (!maybeRelative?.trim()) {
-    return undefined;
-  }
-  const value = maybeRelative.trim();
-  if (/^https?:\/\//i.test(value)) {
-    return value;
-  }
-  try {
-    return new URL(value, sourceUrl).toString();
-  } catch {
-    return value;
-  }
-}
-
-function collectJsonLdArticleBodies(node: unknown, out: string[]) {
-  if (!node) {
-    return;
-  }
-  if (Array.isArray(node)) {
-    node.forEach((item) => collectJsonLdArticleBodies(item, out));
-    return;
-  }
-  if (typeof node !== "object") {
-    return;
-  }
-  const record = node as Record<string, unknown>;
-  const typeRaw = record["@type"];
-  const type = Array.isArray(typeRaw) ? typeRaw.join(" ") : typeof typeRaw === "string" ? typeRaw : "";
-  if (/(newsarticle|article|blogposting|reportagenewsarticle)/i.test(type)) {
-    const candidateBody =
-      typeof record.articleBody === "string"
-        ? record.articleBody
-        : typeof record.description === "string"
-          ? record.description
-          : "";
-    const cleaned = normalizeInlineWhitespace(stripHtml(candidateBody));
-    if (cleaned.length > 120) {
-      out.push(cleaned);
-    }
-  }
-
-  Object.values(record).forEach((value) => collectJsonLdArticleBodies(value, out));
-}
-
-function extractJsonLdArticleText(html: string): string {
-  const outputs: string[] = [];
-  const scripts = Array.from(
-    html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
-  )
-    .map((match) => match[1])
-    .slice(0, 20);
-
-  for (const raw of scripts) {
-    const candidate = raw.trim();
-    if (!candidate) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(candidate) as unknown;
-      collectJsonLdArticleBodies(parsed, outputs);
-    } catch {
-      // ignore malformed JSON-LD block
-    }
-  }
-
-  return outputs.sort((a, b) => b.length - a.length)[0] ?? "";
-}
-
-function postProcessArticleBody(rawBody: string, title: string): string {
-  let body = rawBody
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]+/g, " ")
-    .trim();
-
-  if (!body) {
-    return "";
-  }
-
-  body = body.replace(
-    /^[\s\S]{0,420}?\b\d{1,2}:\d{2}\s*,?\s*\d{1,2}\s+[a-zа-яё]+\s+\d{4}\s*/i,
-    ""
-  );
-  for (let i = 0; i < 4; i += 1) {
-    body = body
-      .replace(/^\s*соглашение:\s*[^.]{0,220}\.\s*/i, "")
-      .replace(/^\s*vk\s*-\s*вк\.?\s*/i, "")
-      .replace(/^\s*erid:\s*[a-z0-9]+\.?\s*/i, "")
-      .replace(/^\s*advertisement:?\s*/i, "")
-      .trim();
-  }
-  body = body.replace(/\b[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё.\- ]{2,100}\((?:редактор|editor)[^)]+\)\s*/gi, "");
-  body = body.replace(/^(?:[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё-]{2,24}\s+){6,}/, "");
-
-  const normalizedTitle = normalizeInlineWhitespace(title).toLowerCase();
-  if (normalizedTitle) {
-    const bodyNorm = normalizeInlineWhitespace(body);
-    if (bodyNorm.toLowerCase().startsWith(normalizedTitle)) {
-      body = bodyNorm.slice(normalizedTitle.length).trim();
-    }
-  }
-
-  return body
-    .replace(/\s{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-    .slice(0, 24_000);
 }
 
 function splitSentences(text: string): string[] {
@@ -563,15 +250,11 @@ async function buildAiSummary(
   }
 }
 
-async function fetchWithTimeout(url: string, timeoutMs = 10_000, init: RequestInit = {}) {
+async function fetchWithTimeout(url: string, timeoutMs = 10_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
-      cache: "no-store",
-      ...init,
-      signal: controller.signal
-    });
+    return await fetch(url, { cache: "no-store", signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -593,34 +276,34 @@ export async function extractArticle(url: string): Promise<{
     }
     const html = await response.text();
     trace.push("fetched_html");
-    const titleTag = normalizeInlineWhitespace(
-      stripHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "")
-    );
-    const ogTitle = extractMetaContent(html, "og:title");
-    const twitterTitle = extractMetaContent(html, "twitter:title");
-    const h1Title = normalizeInlineWhitespace(
-      stripHtml(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "")
-    );
-    const title = ogTitle ?? twitterTitle ?? h1Title ?? titleTag;
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const title = stripHtml(titleMatch?.[1] ?? "");
 
-    const jsonLdText = extractJsonLdArticleText(html);
-    let body = "";
-    if (jsonLdText.length > 280) {
-      body = jsonLdText;
-      trace.push("content_source_jsonld_articleBody");
-    } else {
-      body = pickBestCandidateText(html, trace);
+    const articleMatch = html.match(/<article[\s\S]*?<\/article>/i);
+    if (articleMatch) {
+      trace.push("used_article_tag");
+    }
+    const mainMatch = !articleMatch ? html.match(/<main[\s\S]*?<\/main>/i) : null;
+    if (mainMatch) {
+      trace.push("used_main_tag");
+    }
+    const bodyMatch = !articleMatch && !mainMatch ? html.match(/<body[\s\S]*?<\/body>/i) : null;
+    if (bodyMatch) {
+      trace.push("used_body_tag");
+    }
+    const articleBlock = articleMatch?.[0] ?? mainMatch?.[0] ?? bodyMatch?.[0] ?? html;
+    if (!articleMatch && !mainMatch && !bodyMatch) {
+      trace.push("fallback_whole_html");
     }
 
-    body = postProcessArticleBody(body, title);
-
-    const ogImage = extractMetaContent(html, "og:image");
-    const twitterImage = extractMetaContent(html, "twitter:image");
-    const articleImage =
-      html.match(/<article[\s\S]*?<img[^>]+src=["']([^"']+)["'][^>]*>/i)?.[1] ??
-      html.match(/<main[\s\S]*?<img[^>]+src=["']([^"']+)["'][^>]*>/i)?.[1] ??
-      html.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i)?.[1];
-    const firstImage = absolutizeUrl(url, ogImage ?? twitterImage ?? articleImage);
+    const body = stripHtml(articleBlock).slice(0, 20_000);
+    const ogImage = html.match(
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["'][^>]*>/i
+    )?.[1];
+    const firstImage =
+      ogImage ??
+      html.match(/<img[^>]+src=["']([^"']+)["'][^>]*>/i)?.[1] ??
+      undefined;
 
     markFulltextExtractor("healthy");
     return { title, body, heroImage: firstImage, trace };
@@ -630,214 +313,71 @@ export async function extractArticle(url: string): Promise<{
   }
 }
 
-function splitHardByLength(text: string, maxChars: number): string[] {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return [];
-  }
-  if (trimmed.length <= maxChars) {
-    return [trimmed];
-  }
-
-  const chunks: string[] = [];
-  let cursor = trimmed;
-  while (cursor.length > maxChars) {
-    let cut = cursor.lastIndexOf(" ", maxChars);
-    if (cut < Math.floor(maxChars * 0.6)) {
-      cut = maxChars;
-    }
-    chunks.push(cursor.slice(0, cut).trim());
-    cursor = cursor.slice(cut).trim();
-  }
-  if (cursor) {
-    chunks.push(cursor);
-  }
-  return chunks;
-}
-
-function splitForTranslation(input: string): string[] {
-  const normalized = input.replace(/\r\n/g, "\n").trim();
-  if (!normalized) {
-    return [];
-  }
-  if (normalized.length <= TRANSLATE_CHUNK_MAX_CHARS) {
-    return [normalized];
-  }
-
-  const paragraphs = normalized
-    .split(/\n{2,}/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const units = paragraphs.length > 0 ? paragraphs : [normalized];
-  const expandedUnits: string[] = [];
-
-  for (const unit of units) {
-    if (unit.length <= TRANSLATE_CHUNK_MAX_CHARS) {
-      expandedUnits.push(unit);
-      continue;
-    }
-
-    const sentences = unit
-      .split(/(?<=[.!?])\s+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (sentences.length <= 1) {
-      expandedUnits.push(...splitHardByLength(unit, TRANSLATE_CHUNK_MAX_CHARS));
-      continue;
-    }
-
-    for (const sentence of sentences) {
-      if (sentence.length <= TRANSLATE_CHUNK_MAX_CHARS) {
-        expandedUnits.push(sentence);
-      } else {
-        expandedUnits.push(...splitHardByLength(sentence, TRANSLATE_CHUNK_MAX_CHARS));
-      }
-    }
-  }
-
-  const chunks: string[] = [];
-  let current = "";
-  for (const unit of expandedUnits) {
-    const next = current ? `${current}\n\n${unit}` : unit;
-    if (next.length > TRANSLATE_CHUNK_MAX_CHARS && current) {
-      chunks.push(current.trim());
-      current = unit;
-    } else {
-      current = next;
-    }
-  }
-  if (current.trim()) {
-    chunks.push(current.trim());
-  }
-
-  return chunks.slice(0, TRANSLATE_MAX_CHUNKS);
-}
-
-async function translateWithLibre(chunk: string, targetLang: Locale): Promise<string | null> {
-  const endpoint = process.env.LIBRETRANSLATE_URL?.trim();
-  if (!endpoint) {
-    return null;
-  }
-
-  const apiKey = process.env.LIBRETRANSLATE_API_KEY?.trim();
-  try {
-    const response = await fetchWithTimeout(endpoint, 15_000, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        q: chunk,
-        source: "auto",
-        target: targetLang,
-        format: "text",
-        ...(apiKey ? { api_key: apiKey } : {})
-      })
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = (await response.json()) as { translatedText?: string };
-    const translated = data.translatedText?.trim();
-    return translated ? translated : null;
-  } catch {
-    return null;
-  }
-}
-
-async function translateWithLlm(chunk: string, targetLang: Locale): Promise<string | null> {
-  const llm = getLlmConfig();
-  if (!llm.apiKey) {
-    return null;
-  }
-
-  try {
-    const result = await requestLiveLlm({
-      temperature: 0,
-      model: llm.model,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a professional translator. Return only translated text. Preserve names, numbers, currencies, and paragraph structure."
-        },
-        {
-          role: "user",
-          content: [
-            `Translate to language code "${targetLang}".`,
-            "Do not add comments.",
-            "",
-            "Text:",
-            chunk
-          ].join("\n")
-        }
-      ]
-    });
-    const translated = result.content.trim();
-    return translated ? translated : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function translateText(input: string, targetLang: Locale): Promise<string> {
-  const normalized = input.trim();
-  if (!normalized) {
+  if (!input.trim()) {
     return "";
   }
 
-  const chunks = splitForTranslation(normalized);
-  if (chunks.length === 0) {
-    return normalized;
+  if (targetLang === "en") {
+    return input;
   }
 
-  const translatedChunks: Array<string | null> = new Array(chunks.length).fill(null);
-  for (let i = 0; i < chunks.length; i += 1) {
-    translatedChunks[i] = await translateWithLibre(chunks[i], targetLang);
-  }
+  const endpoint = process.env.LIBRETRANSLATE_URL;
+  if (endpoint) {
+    try {
+      const response = await fetchWithTimeout(endpoint, 12_000);
+      if (response.ok) {
+        const translationResponse = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            q: input.slice(0, 8000),
+            source: "auto",
+            target: targetLang,
+            format: "text"
+          })
+        });
 
-  for (let i = 0; i < chunks.length; i += 1) {
-    if (translatedChunks[i]) {
-      continue;
+        if (translationResponse.ok) {
+          const data = (await translationResponse.json()) as { translatedText?: string };
+          if (data.translatedText?.trim()) {
+            return data.translatedText.trim();
+          }
+        }
+      }
+    } catch {
+      // fallback below
     }
-    translatedChunks[i] = await translateWithLlm(chunks[i], targetLang);
   }
 
-  const hasAnyTranslated = translatedChunks.some((item) => Boolean(item));
-  if (!hasAnyTranslated) {
-    return normalized;
+  const llm = getLlmConfig();
+  if (llm.apiKey) {
+    try {
+      const result = await requestLiveLlm({
+        temperature: 0,
+        model: llm.model,
+        messages: [
+          {
+            role: "system",
+            content: "You are a translator. Return only translated text without comments."
+          },
+          {
+            role: "user",
+            content: `Translate to language code \"${targetLang}\".\n\nText:\n${input.slice(0, 7000)}`
+          }
+        ]
+      });
+      if (result.content.trim()) {
+        return result.content.trim();
+      }
+    } catch {
+      // fallback below
+    }
   }
 
-  return translatedChunks
-    .map((item, index) => (item?.trim() ? item.trim() : chunks[index]))
-    .join("\n\n")
-    .trim();
-}
-
-function translationLooksUnavailable(original: string, translated: string, targetLang: Locale): boolean {
-  if (!original.trim()) {
-    return false;
-  }
-  if (original !== translated) {
-    return false;
-  }
-
-  const sample = original.slice(0, 3000);
-  if (targetLang === "ru" || targetLang === "be" || targetLang === "kk") {
-    return !/[А-Яа-яЁё]/.test(sample);
-  }
-  if (targetLang === "hy") {
-    return !/[Ա-Ֆա-ֆ]/.test(sample);
-  }
-  if (targetLang === "ka") {
-    return !/[\u10A0-\u10FF]/.test(sample);
-  }
-  if (targetLang === "ar") {
-    return !/[\u0600-\u06FF]/.test(sample);
-  }
-  return false;
+  return input;
 }
 
 export async function getTranslatedArticle(url: string, lang: Locale): Promise<TranslatedArticlePayload> {
@@ -846,7 +386,7 @@ export async function getTranslatedArticle(url: string, lang: Locale): Promise<T
     .createHash("sha1")
     .update(`${title}:${body}`)
     .digest("hex");
-  const key = `${ARTICLE_PIPELINE_VERSION}:${url}:${lang}:${contentHash}`;
+  const key = `${url}:${lang}:${contentHash}`;
 
   const cached = ARTICLE_CACHE.get(key);
   if (cached) {
@@ -857,13 +397,9 @@ export async function getTranslatedArticle(url: string, lang: Locale): Promise<T
     };
   }
 
-  const [translatedTitle, translatedBody] = await Promise.all([
-    translateText(title, lang),
-    translateText(body, lang)
-  ]);
-  const translationFallback =
-    translationLooksUnavailable(title, translatedTitle, lang) ||
-    translationLooksUnavailable(body, translatedBody, lang);
+  const translatedTitle = await translateText(title, lang);
+  const translatedBody = await translateText(body, lang);
+  const translationFallback = translatedBody === body && translatedTitle === title;
   const originalTextBlocks = chunkTextIntoBlocks(body);
   const fullTextBlocks = chunkTextIntoBlocks(translatedBody);
   const extractionStatus: "ok" | "partial" | "failed" =
@@ -883,7 +419,7 @@ export async function getTranslatedArticle(url: string, lang: Locale): Promise<T
     fallbackReason:
       extractionStatus === "failed"
         ? "fulltext_unavailable"
-        : translationFallback
+        : translationFallback && lang !== "en"
           ? "translation_service_unavailable"
           : undefined,
     summary,

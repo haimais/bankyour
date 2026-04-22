@@ -16,7 +16,7 @@ import {
   ServicesApiResponse
 } from "@/lib/types";
 
-const REFRESH_INTERVAL_MS = 180_000;
+const REFRESH_INTERVAL_MS = 60_000;
 
 interface LiveOffersBoardProps {
   visibleServices?: ServiceType[];
