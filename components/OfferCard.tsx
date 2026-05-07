@@ -30,12 +30,14 @@ export function OfferCard({ offer, index }: OfferCardProps) {
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 14 }}
+      initial={{ opacity: 0, y: 15 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.25 }}
-      transition={{ duration: 0.35, delay: index * 0.05 }}
-      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card"
+      viewport={{ once: true, amount: 0.2 }}
+      whileHover={{ scale: 1.01, translateY: -2 }}
+      transition={{ duration: 0.35, ease: "easeOut", delay: index * 0.05 }}
+      className="group relative overflow-hidden rounded-2xl border border-slate-200/60 bg-white/80 p-6 shadow-sm backdrop-blur-md transition-all hover:border-blue-200 hover:shadow-xl hover:shadow-blue-500/10"
     >
+      <div className="pointer-events-none absolute -right-20 -top-20 -z-10 h-40 w-40 rounded-full bg-blue-400/10 blur-3xl transition-opacity group-hover:bg-blue-400/20" />
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div>
@@ -52,13 +54,13 @@ export function OfferCard({ offer, index }: OfferCardProps) {
 
       <p className="mb-4 text-sm leading-6 text-slate-600">{offer.description}</p>
 
-      <dl className="mb-4 grid gap-2 sm:grid-cols-2">
+      <dl className="mb-4 grid gap-3 sm:grid-cols-2">
         {offer.params.map((param) => (
-          <div key={param.label} className="rounded-lg bg-slate-50 px-3 py-2">
-            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          <div key={param.label} className="rounded-xl bg-slate-50/80 px-4 py-3 transition-colors group-hover:bg-blue-50/50">
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
               {param.label}
             </dt>
-            <dd className="text-sm font-semibold text-slate-800">{param.value}</dd>
+            <dd className="mt-1 text-sm font-bold text-slate-800">{param.value}</dd>
           </div>
         ))}
       </dl>

@@ -47,15 +47,18 @@ const ARTICLE_AI_SUMMARY_CACHE = new Map<
 >();
 
 function stripHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+  // Вырезаем блоки, в которых часто бывает мусор (реклама, меню, футер)
+  let cleanHtml = html
+    .replace(/<(script|style|noscript|nav|footer|aside|header|iframe|form)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/gi, " ");
+
+  return cleanHtml
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&[a-z]+;/gi, " ") // Прочие HTML entities
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -361,16 +364,19 @@ export async function translateText(input: string, targetLang: Locale): Promise<
         messages: [
           {
             role: "system",
-            content: "You are a translator. Return only translated text without comments."
+            content: "You are a professional financial translator. Return ONLY the translated text without any conversational filler, prefixes (like 'Here is the translation'), or comments. Translate accurately while preserving the professional tone."
           },
           {
             role: "user",
-            content: `Translate to language code \"${targetLang}\".\n\nText:\n${input.slice(0, 7000)}`
+            content: `Translate the following text to language code "${targetLang}":\n\n${input.slice(0, 7000)}`
           }
         ]
       });
-      if (result.content.trim()) {
-        return result.content.trim();
+      const cleanContent = result.content
+        .replace(/^(here is the translation|перевод:|translation:|вот перевод:|translated text:|переведенный текст:)\s*/i, "")
+        .trim();
+      if (cleanContent) {
+        return cleanContent;
       }
     } catch {
       // fallback below

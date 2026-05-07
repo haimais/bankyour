@@ -83,7 +83,17 @@ export function CatalogProductCard({
   }, [item]);
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+    <motion.article
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      whileHover={{ scale: 1.01, translateY: -2 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      className="group relative overflow-hidden rounded-2xl border border-slate-200/60 bg-white/80 p-6 shadow-sm backdrop-blur-md transition-all hover:border-blue-200 hover:shadow-xl hover:shadow-blue-500/10"
+    >
+      {/* Decorative gradient background */}
+      <div className="pointer-events-none absolute -right-20 -top-20 -z-10 h-40 w-40 rounded-full bg-blue-400/10 blur-3xl transition-opacity group-hover:bg-blue-400/20" />
+
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div>
@@ -138,11 +148,11 @@ export function CatalogProductCard({
         </div>
       )}
 
-      <dl className="grid gap-2 sm:grid-cols-2">
+      <dl className="grid gap-3 sm:grid-cols-2">
         {(item.params || []).slice(0, 4).map((param) => (
-          <div key={`${param.label}-${param.value}`} className="rounded-lg bg-slate-50 px-3 py-2">
-            <dt className="text-xs uppercase tracking-wide text-slate-500">{param.label}</dt>
-            <dd className="text-sm font-semibold text-slate-800">{param.value}</dd>
+          <div key={`${param.label}-${param.value}`} className="rounded-xl bg-slate-50/80 px-4 py-3 transition-colors group-hover:bg-blue-50/50">
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{param.label}</dt>
+            <dd className="mt-1 text-sm font-bold text-slate-800">{param.value}</dd>
           </div>
         ))}
       </dl>
@@ -254,6 +264,6 @@ export function CatalogProductCard({
           </motion.div>
         ) : null}
       </AnimatePresence>
-    </article>
+    </motion.article>
   );
 }

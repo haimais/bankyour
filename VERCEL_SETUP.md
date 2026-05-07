@@ -6,7 +6,7 @@
 ```
 LLM_PROVIDER=gigachat
 LLM_BASE_URL=https://gigachat.devices.sberbank.ru/api/v1
-LLM_API_KEY=your-gigachat-api-key
+LLM_API_KEY=019c754d-712f-7ed9-8873-2a9fded75904
 LLM_MODEL=GigaChat
 GIGACHAT_AUTH_URL=https://ngw.devices.sberbank.ru:9443/api/v2/oauth
 GIGACHAT_SCOPE=GIGACHAT_API_PERS
