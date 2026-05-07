@@ -709,11 +709,10 @@ export function CatalogExplorer({ initialCategory, initialQuery }: CatalogExplor
                 setCategory(item.key);
                 setPage(1);
               }}
-              className={`group flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm font-medium transition ${
-                category === item.key
+              className={`group flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm font-medium transition ${category === item.key
                   ? "border-blue-300 bg-blue-50 text-blue-700"
                   : "border-slate-200 bg-white text-slate-700 hover:bg-blue-50"
-              }`}
+                }`}
             >
               <div className="flex min-w-0 items-center gap-2">
                 <CategoryIcon icon={item.icon} size={16} className={category === item.key ? "text-blue-700" : "text-slate-500"} />
@@ -808,33 +807,33 @@ export function CatalogExplorer({ initialCategory, initialQuery }: CatalogExplor
           </select>
           {/* Removed overly complex filters to improve UI clarity and performance */}
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          {!isBankGroupMode ? (
-            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={onlineOnly}
-                onChange={(event) => setOnlineOnly(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              {localText(locale, "onlineOnly")}
-            </label>
-          ) : (
-            <p className="text-sm text-slate-600">
-              {locale === "ru"
-                ? "Карточные предложения сгруппированы по банкам. Откройте банк, чтобы увидеть все продукты."
-                : "Card offers are grouped by bank. Expand a bank to view all products."}
-            </p>
-          )}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            {!isBankGroupMode ? (
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={onlineOnly}
+                  onChange={(event) => setOnlineOnly(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                {localText(locale, "onlineOnly")}
+              </label>
+            ) : (
+              <p className="text-sm text-slate-600">
+                {locale === "ru"
+                  ? "Карточные предложения сгруппированы по банкам. Откройте банк, чтобы увидеть все продукты."
+                  : "Card offers are grouped by bank. Expand a bank to view all products."}
+              </p>
+            )}
 
-          <button
-            onClick={clearFilters}
-            aria-label="Clear filters"
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50"
-          >
-            {copy.clearFilters}
-          </button>
-        </div>
+            <button
+              onClick={clearFilters}
+              aria-label="Clear filters"
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50"
+            >
+              {copy.clearFilters}
+            </button>
+          </div>
       </section>
 
       <motion.section
